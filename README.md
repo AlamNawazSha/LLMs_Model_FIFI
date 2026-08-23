@@ -1,105 +1,41 @@
-# Academic Title Retrieval Pipeline
+# FIFI 2026 — Scientific Title Retrieval & Rewriting
 
-This project finds the **original academic title** when given a **rewritten title** (Catchy, Accessible, etc.).
+Solution for the **FIFI@FIRE 2026** shared task: trace an LLM-rewritten scientific title back to its original.
+Task site: https://fifi-2026.github.io/FIFI-2026
 
-It uses:
-- **Dense search** (fine-tuned AI model)
-- **BM25 search** (keyword matching)
-- **Reranker** (picks the best final answer)
+## Task
+LLMs rewrite titles into 3 styles: **Technical**, **Accessible**, **Catchy**.
+- **Subtask 1 (Find It):** rewritten title → ranked top-10 original titles. Metric: **MRR@10**
+- **Subtask 2 (Fix It):** rewritten title + style label → reconstructed original title. Metric: **F1 + BERTScore**
 
----
+## Pipeline
+Bi-encoder and reranker are fine-tuned (not zero-shot) using **hard negatives**, since Catchy/Accessible titles drift furthest from the original and are hardest to match. Candidates are oversampled for those categories, fused by rank (not raw score), and the style label is fed into Subtask 2 as allowed.
 
-## 📁 Files
+## Files
+| File | Purpose |
+|---|---|
+| `finetuned_retrieval_pipeline_v2.py` | Main script |
+| `train.tsv` / `val.tsv` | Data (columns: `id`, `category`, `generated_title`, `original_title`) |
+| `subtask1_submission.tsv` / `subtask2_submission.tsv` | Outputs |
 
-| File | What it is |
-|------|------------|
-| `finetuned_retrieval_pipeline_v2.py` | Main script — run this |
-| `train.tsv` | Training data (you provide) |
-| `val.tsv` | Validation data (you provide) |
-| `subtask1_submission.tsv` | Output: top 10 guesses per title |
-| `subtask2_submission.tsv` | Output: best single guess per title |
-
----
-
-## 📊 Data Format
-
-Your `.tsv` files need these columns:
-
-| Column | Meaning |
-|--------|---------|
-| `id` | Row ID |
-| `category` | Rewrite style (Catchy, Accessible, etc.) |
-| `generated_title` | The rewritten title |
-| `original_title` | The real academic title |
-
----
-
-## ⚙️ Install
-
+## Setup & Run
 ```bash
 pip install -q sentence-transformers rank_bm25 faiss-gpu transformers accelerate bert-score evaluate
-```
-
-Needs a GPU. Works on CPU too, just slower.
-
----
-
-## ▶️ Run
-
-```bash
 python finetuned_retrieval_pipeline_v2.py
 ```
+GPU recommended. First run trains + caches everything (bi-encoder, reranker, hard negatives); later runs reuse the cache. Prints MRR@10 overall and **per category** so you can check Catchy/Accessible improvement.
 
-**What happens:**
-1. Loads and cleans your data
-2. Trains the AI model on your examples
-3. Trains the reranker
-4. Searches for matches
-5. Saves results + prints scores
-
-First run trains everything (takes longer). After that, it reuses saved models automatically — much faster.
-
----
-
-## 🎯 Why It Works Well
-
-Catchy and Accessible titles are the hardest to match because they use very different words from the original. This pipeline fixes that by:
-
-- Teaching the model with **hard examples** (similar-but-wrong titles), not just random ones
-- Training the model **extra** on Catchy/Accessible examples
-- Combining both search methods **fairly** instead of favoring one
-
----
-
-## 📈 Scores You'll See
-
-| Metric | What it Measures |
-|--------|-------------------|
-| MRR@10 | How high the correct answer ranks (top 10 list) |
-| Token F1 | Word overlap with correct answer |
-| BERTScore | Meaning similarity with correct answer |
-
-Per-category scores are also printed, so you can check if Catchy/Accessible improved.
-
----
-
-## 🛠️ Common Issue
-
-**Error:** `'DataParallel' object has no attribute 'preprocess'`
-
-**Cause:** Multiple GPUs detected, causing a conflict.
-
-**Fix:** Already handled in the script (forces single GPU use).
-
----
-
-## 🔧 Settings You Can Tweak
-
-Found near the top of the script:
-
+## Key Settings
 ```python
-HARD_CATEGORIES = {"Catchy", "Accessible"}   # categories to focus on
-HARD_CATEGORY_OVERSAMPLE_FACTOR = 2          # how much extra training for them
-N_HARD_NEGATIVES = 4                         # tricky wrong answers per example
-TOP_K_PER_RETRIEVER = 50                     # candidates to consider before final pick
+HARD_CATEGORIES = {"Catchy", "Accessible"}
+HARD_CATEGORY_OVERSAMPLE_FACTOR = 2
+N_HARD_NEGATIVES = 4
+TOP_K_PER_RETRIEVER = 50
+RRF_K = 60
 ```
+
+## Troubleshooting
+`AttributeError: 'DataParallel' object has no attribute 'preprocess'` → caused by multiple visible GPUs; fixed by pinning `CUDA_VISIBLE_DEVICES=0` at the top of the script.
+
+## Credit
+Task & dataset by the FIFI Shared Task, FIRE 2026.
